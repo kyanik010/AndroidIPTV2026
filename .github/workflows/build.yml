@@ -118,7 +118,7 @@ jobs:
             echo "## EXIPTV Android build"
             echo ""
             echo "- Version: **$VERSION**"
-            echo "- Source: \`${ZIPS[0]}\`"
+            echo "- Source: ${{ steps.source.outputs.archive }}"
             echo "- APK files:"
             printf '  - %s\n' "${APKS[@]}"
           } >> "$GITHUB_STEP_SUMMARY"
