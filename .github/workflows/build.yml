@@ -33,5 +33,11 @@ jobs:
           while IFS= read -r f; do echo "--- $f"; sed -n '1,220p' "$f"; done < <(find _src -name Cargo.toml | head -10)
           echo "===== NODE MANIFESTS ====="
           while IFS= read -r f; do echo "--- $f"; sed -n '1,180p' "$f"; done < <(find _src -name package.json | head -10)
+          echo "===== EMBEDDED ANDROID WORKFLOW ====="
+          sed -n '1,300p' _src/.github/workflows/android-build.yml
+          echo "===== ANDROID POST-PROCESS SCRIPT ====="
+          sed -n '1,260p' _src/scripts/android-nachbereiten.py
+          echo "===== KOTLIN PLUGIN GRADLE ====="
+          sed -n '1,220p' _src/android-plugin/build.gradle.kts
           echo "===== LOCK / TOOLCHAIN FILES ====="
           find _src -maxdepth 5 \( -name 'Cargo.lock' -o -name 'rust-toolchain*' -o -name 'pnpm-lock.yaml' -o -name 'package-lock.json' -o -name 'yarn.lock' \) -print | sort
