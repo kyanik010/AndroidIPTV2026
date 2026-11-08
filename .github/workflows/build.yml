@@ -225,7 +225,7 @@ jobs:
           KEY_PASS="$(openssl rand -hex 16)"
           test -x "$ZIPALIGN" || { echo "::error::zipalign not found in $BUILD_TOOLS"; exit 1; }
           test -x "$APKSIGNER" || { echo "::error::apksigner not found in $BUILD_TOOLS"; exit 1; }
-          keytool -genkeypair -v -keystore "$KEYSTORE" -storepass "$STORE_PASS" -keypass "$KEY_PASS" -alias exiptv -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=EXIPTV, OU=Android, O=EXIPTV, L=Unknown, ST=Unknown, C=US"
+          keytool -genkeypair -v -storetype JKS -keystore "$KEYSTORE" -storepass "$STORE_PASS" -keypass "$KEY_PASS" -alias exiptv -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=EXIPTV, OU=Android, O=EXIPTV, L=Unknown, ST=Unknown, C=US"
           "$ZIPALIGN" -f -v 4 "$APK" "$ALIGNED"
           "$APKSIGNER" sign --ks "$KEYSTORE" --ks-key-alias exiptv --ks-pass "pass:$STORE_PASS" --key-pass "pass:$KEY_PASS" --out "$SIGNED" "$ALIGNED"
           "$APKSIGNER" verify --verbose --print-certs "$SIGNED"
