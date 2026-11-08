@@ -214,9 +214,23 @@ jobs:
             find src-tauri/gen/android -name '*.apk' -o -name '*.aab' | head -30
             exit 1
           fi
-          echo "APK: $APK"
-          echo "path=$APK" >> "$GITHUB_OUTPUT"
           VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          BUILD_TOOLS="$(find "$ANDROID_SDK_ROOT/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          ZIPALIGN="$BUILD_TOOLS/zipalign"
+          APKSIGNER="$BUILD_TOOLS/apksigner"
+          KEYSTORE="$RUNNER_TEMP/exiptv-debug-signing.jks"
+          ALIGNED="$RUNNER_TEMP/exiptv-aligned.apk"
+          SIGNED="src-tauri/gen/android/app/build/outputs/apk/universal/release/EXIPTV-v$VERSION-signed.apk"
+          STORE_PASS="$(openssl rand -hex 16)"
+          KEY_PASS="$(openssl rand -hex 16)"
+          test -x "$ZIPALIGN" || { echo "::error::zipalign not found in $BUILD_TOOLS"; exit 1; }
+          test -x "$APKSIGNER" || { echo "::error::apksigner not found in $BUILD_TOOLS"; exit 1; }
+          keytool -genkeypair -v -keystore "$KEYSTORE" -storepass "$STORE_PASS" -keypass "$KEY_PASS" -alias exiptv -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=EXIPTV, OU=Android, O=EXIPTV, L=Unknown, ST=Unknown, C=US"
+          "$ZIPALIGN" -f -v 4 "$APK" "$ALIGNED"
+          "$APKSIGNER" sign --ks "$KEYSTORE" --ks-key-alias exiptv --ks-pass "pass:$STORE_PASS" --key-pass "pass:$KEY_PASS" --out "$SIGNED" "$ALIGNED"
+          "$APKSIGNER" verify --verbose --print-certs "$SIGNED"
+          echo "Signed APK: $SIGNED"
+          echo "path=$SIGNED" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: APK als Artefakt hochladen
