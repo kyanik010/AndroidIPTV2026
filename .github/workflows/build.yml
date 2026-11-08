@@ -1,9 +1,10 @@
-name: Diagnose Android project structure
+name: Inspect embedded Android build workflow
 
 on:
   push:
     branches:
       - fix/tauri-android-workflow
+      - fix/tauri-android-workflow-inspect2
   workflow_dispatch:
 
 jobs:
