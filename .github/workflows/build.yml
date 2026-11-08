@@ -72,16 +72,16 @@ jobs:
           if "tauri::mobile_entry_point" in source:
               print("Tauri mobile entry point already present.")
           else:
-              pattern = re.compile(r"(?m)^(?P<indent>[ \\t]*)pub\\s+fn\\s+run\\s*\\(")
+              pattern = re.compile(r"(?m)^(?P<indent>[ \t]*)pub\s+fn\s+run\s*\(")
               match = pattern.search(source)
               if not match:
                   raise SystemExit("ERROR: no pub fn run() found in src-tauri/src/lib.rs; cannot safely apply the Android entry-point attribute")
-              source = source[:match.start()] + "#[cfg_attr(mobile, tauri::mobile_entry_point)]\\n" + source[match.start():]
+              source = source[:match.start()] + "#[cfg_attr(mobile, tauri::mobile_entry_point)]\n" + source[match.start():]
               p.write_text(source, encoding="utf-8")
               print("Added #[cfg_attr(mobile, tauri::mobile_entry_point)] to pub fn run().")
           PY
           echo "===== Verified mobile entry point ====="
-          grep -n -B2 -A2 "mobile_entry_point\\|pub fn run" src-tauri/src/lib.rs
+          grep -n -B2 -A2 "mobile_entry_point\|pub fn run" src-tauri/src/lib.rs
 
       - name: Java einrichten
         uses: actions/setup-java@v4
