@@ -35,6 +35,7 @@ jobs:
             exit 1
           fi
           echo "project_root=_src" >> "$GITHUB_OUTPUT"
+          echo "archive=${ZIPS[0]}" >> "$GITHUB_OUTPUT"
           echo "Source archive: \${ZIPS[0]}"
           node -e "const c=require('./_src/src-tauri/tauri.conf.json'); console.log('Tauri app:', c.productName, 'version:', c.version)"
 
