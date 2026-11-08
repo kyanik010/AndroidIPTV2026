@@ -21,14 +21,14 @@ jobs:
         run: |
           set -euo pipefail
           mapfile -t ZIPS < <(git ls-files '*.zip')
-          if [ "\${#ZIPS[@]}" -ne 1 ]; then
-            echo "Expected exactly one source ZIP, found \${#ZIPS[@]}"
-            printf '%s\n' "\${ZIPS[@]}"
+          if [ "${#ZIPS[@]}" -ne 1 ]; then
+            echo "Expected exactly one source ZIP, found ${#ZIPS[@]}"
+            printf '%s\n' "${ZIPS[@]}"
             exit 1
           fi
           rm -rf _src
           mkdir -p _src
-          unzip -q "\${ZIPS[0]}" -d _src
+          unzip -q "${ZIPS[0]}" -d _src
           if [ ! -f _src/package.json ] || [ ! -f _src/src-tauri/tauri.conf.json ]; then
             echo "ZIP is missing package.json or src-tauri/tauri.conf.json"
             find _src -maxdepth 3 -type f | sort | head -200
@@ -36,7 +36,7 @@ jobs:
           fi
           echo "project_root=_src" >> "$GITHUB_OUTPUT"
           echo "archive=${ZIPS[0]}" >> "$GITHUB_OUTPUT"
-          echo "Source archive: \${ZIPS[0]}"
+          echo "Source archive: ${ZIPS[0]}"
           node -e "const c=require('./_src/src-tauri/tauri.conf.json'); console.log('Tauri app:', c.productName, 'version:', c.version)"
 
       - name: Set up Node.js
@@ -99,14 +99,14 @@ jobs:
         run: |
           set -euo pipefail
           mapfile -t APKS < <(find _src/src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' 2>/dev/null | sort)
-          if [ "\${#APKS[@]}" -eq 0 ]; then
+          if [ "${#APKS[@]}" -eq 0 ]; then
             echo "No APK produced. Android build output:"
             find _src/src-tauri/gen/android/app/build/outputs -maxdepth 7 -type f 2>/dev/null | sort || true
             exit 1
           fi
           VERSION="$(node -p "require('./_src/src-tauri/tauri.conf.json').version")"
           mkdir -p dist-apk
-          for apk in "\${APKS[@]}"; do
+          for apk in "${APKS[@]}"; do
             cp "$apk" "dist-apk/$(basename "$apk")"
           done
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -114,15 +114,15 @@ jobs:
             echo "## EXIPTV Android build"
             echo ""
             echo "- Version: **$VERSION**"
-            echo "- Source: \`\${ZIPS[0]}\`"
+            echo "- Source: \`${ZIPS[0]}\`"
             echo "- APK files:"
-            printf '  - %s\n' "\${APKS[@]}"
+            printf '  - %s\n' "${APKS[@]}"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: EXIPTV-Android-v\${{ steps.apk.outputs.version }}
+          name: EXIPTV-Android-v${{ steps.apk.outputs.version }}
           path: dist-apk/*.apk
           if-no-files-found: error
           retention-days: 14
