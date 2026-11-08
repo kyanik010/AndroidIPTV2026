@@ -1,28 +1,29 @@
-name: EXIPTV Android APK
+name: EXIPTV Android-Build (APK)
 
 on:
-  push:
   workflow_dispatch:
+  push:
+    branches: [ main, master ]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  build-android:
+  android:
+    name: Android-APK
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Extract and validate source ZIP
-        id: source
+      - name: ZIP-Projekt extrahieren
+        id: locate
         shell: bash
         run: |
           set -euo pipefail
           mapfile -t ZIPS < <(git ls-files '*.zip')
           if [ "${#ZIPS[@]}" -ne 1 ]; then
-            echo "Expected exactly one source ZIP, found ${#ZIPS[@]}"
+            echo "::error::Erwartet wurde genau eine Projekt-ZIP, gefunden: ${#ZIPS[@]}"
             printf '%s\n' "${ZIPS[@]}"
             exit 1
           fi
@@ -30,103 +31,160 @@ jobs:
           mkdir -p _src
           unzip -q "${ZIPS[0]}" -d _src
           if [ ! -f _src/package.json ] || [ ! -f _src/src-tauri/tauri.conf.json ]; then
-            echo "ZIP is missing package.json or src-tauri/tauri.conf.json"
-            find _src -maxdepth 3 -type f | sort | head -200
+            echo "::error::Die ZIP enthält kein gültiges Tauri-Projekt im erwarteten Layout."
+            find _src -maxdepth 4 -type f | sort | head -200
             exit 1
           fi
-          echo "project_root=_src" >> "$GITHUB_OUTPUT"
+          echo "dir=_src" >> "$GITHUB_OUTPUT"
           echo "archive=${ZIPS[0]}" >> "$GITHUB_OUTPUT"
-          echo "Source archive: ${ZIPS[0]}"
-          node -e "const c=require('./_src/src-tauri/tauri.conf.json'); console.log('Tauri app:', c.productName, 'version:', c.version)"
+          echo "Projekt-ZIP: ${ZIPS[0]}"
+          node -e "const c=require('./_src/src-tauri/tauri.conf.json'); console.log('App:', c.productName, 'Version:', c.version)"
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: _src/package-lock.json
-
-      - name: Set up Java 17
+      - name: Java einrichten
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Rust and Android targets
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-linux-android,armv7-linux-androideabi
-
-      - name: Set up Android SDK
+      - name: Android SDK einrichten
         uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK and NDK packages
+      - name: Android NDK und SDK-Plattformen installieren
         shell: bash
         run: |
           set -euo pipefail
-          yes | sdkmanager --licenses >/dev/null
-          sdkmanager \
-            "platforms;android-35" \
-            "build-tools;35.0.0" \
-            "platform-tools" \
-            "ndk;27.0.12077973"
-          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-          if [ -z "$SDK_ROOT" ]; then echo "Android SDK root is not configured"; exit 1; fi
-          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
-          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
-          echo "ANDROID_NDK_HOME=$SDK_ROOT/ndk/27.0.12077973" >> "$GITHUB_ENV"
-          echo "NDK_HOME=$SDK_ROOT/ndk/27.0.12077973" >> "$GITHUB_ENV"
+          sdkmanager --install \
+            "ndk;27.1.12297006" \
+            "platforms;android-33" "platforms;android-34" "platforms;android-35" \
+            "build-tools;33.0.2" "build-tools;34.0.0" "build-tools;35.0.0" \
+            "platform-tools"
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          if [ -z "$SDK_ROOT" ]; then echo "::error::Android SDK root not configured"; exit 1; fi
+          echo "NDK_HOME=$SDK_ROOT/ndk/27.1.12297006" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$SDK_ROOT/ndk/27.1.12297006" >> "$GITHUB_ENV"
 
-      - name: Install frontend dependencies
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: _src/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: exiptv-android-v1
+          workspaces: _src/src-tauri
+
+      - name: Projektbefehle prüfen
         working-directory: _src
-        run: npm ci --no-audit --no-fund
+        run: python3 scripts/befehle-pruefen.py
 
-      - name: Test Rust core
+      - name: Frontend-Abhängigkeiten installieren
         working-directory: _src
-        run: cargo test --workspace --locked
+        shell: bash
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
-      - name: Initialize Tauri Android project
+      - name: Frontend bauen
         working-directory: _src
-        run: npm run tauri android init -- --ci
+        run: npm run build
 
-      - name: Apply project Android configuration
+      - name: Tauri CLI sicherstellen
         working-directory: _src
-        run: python3 scripts/android-nachbereiten.py
+        run: npm install -D @tauri-apps/cli@^2
 
-      - name: Build Android APK
+      - name: Android-Gradle-Projekt erzeugen
         working-directory: _src
-        run: npm run tauri android build -- --apk --debug --target aarch64 --target armv7
+        run: npx tauri android init --ci
 
-      - name: Collect APK and build metadata
-        id: apk
+      - name: Android-Berechtigungen und ExoPlayer-Plugin einfügen
+        working-directory: _src
+        run: python3 scripts/android-nachbereiten.py .
+
+      - name: Gradle vorbereiten
+        working-directory: _src
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t APKS < <(find _src/src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' 2>/dev/null | sort)
-          if [ "${#APKS[@]}" -eq 0 ]; then
-            echo "No APK produced. Android build output:"
-            find _src/src-tauri/gen/android/app/build/outputs -maxdepth 7 -type f 2>/dev/null | sort || true
+          AND="src-tauri/gen/android"
+          test -f "$AND/gradlew" || { echo "::error::Tauri did not generate the Gradle wrapper"; exit 1; }
+          chmod +x "$AND/gradlew"
+          PROPS="$AND/gradle.properties"
+          touch "$PROPS"
+          grep -q "org.gradle.jvmargs" "$PROPS" || echo "org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1024m" >> "$PROPS"
+          grep -q "org.gradle.daemon" "$PROPS" || echo "org.gradle.daemon=false" >> "$PROPS"
+          grep -q "android.useAndroidX" "$PROPS" || echo "android.useAndroidX=true" >> "$PROPS"
+          echo "===== Gradle properties ====="
+          cat "$PROPS"
+
+      - name: Android APK bauen
+        working-directory: _src
+        shell: bash
+        run: |
+          set -o pipefail
+          if npx tauri android build --apk --target aarch64 2>&1 | tee /tmp/android-build.log; then
+            echo "Android APK build succeeded."
+          else
+            echo "===== Gradle failure ====="
+            awk '/FAILURE: Build failed/,0' /tmp/android-build.log | head -80 || true
+            echo "===== Kotlin/Java errors ====="
+            grep -n "^e: \|error: \|Caused by:" /tmp/android-build.log | head -40 || true
+            echo "===== Last build log lines ====="
+            tail -80 /tmp/android-build.log
             exit 1
           fi
-          VERSION="$(node -p "require('./_src/src-tauri/tauri.conf.json').version")"
-          mkdir -p dist-apk
-          for apk in "${APKS[@]}"; do
-            cp "$apk" "dist-apk/$(basename "$apk")"
-          done
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          {
-            echo "## EXIPTV Android build"
-            echo ""
-            echo "- Version: **$VERSION**"
-            echo "- Source: ${{ steps.source.outputs.archive }}"
-            echo "- APK files:"
-            printf '  - %s\n' "${APKS[@]}"
-          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload APK artifacts
+      - name: Android build diagnostics
+        if: failure()
+        working-directory: _src
+        shell: bash
+        run: |
+          AND="src-tauri/gen/android"
+          echo "===== Generated Android project ====="
+          ls -la "$AND" 2>/dev/null || echo "Android project directory missing"
+          echo "===== SDK versions ====="
+          grep -rn "compileSdk\|targetSdk\|minSdk" "$AND/app/build.gradle.kts" 2>/dev/null | head -20 || true
+          echo "===== Gradle wrapper ====="
+          grep distributionUrl "$AND/gradle/wrapper/gradle-wrapper.properties" 2>/dev/null || true
+          echo "===== APK/AAB outputs ====="
+          find "$AND" -name '*.apk' -o -name '*.aab' 2>/dev/null | head -30 || true
+
+      - name: APK finden
+        id: apk
+        working-directory: _src
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$(find src-tauri/gen/android -type f -name '*.apk' | sort | head -n 1)"
+          if [ -z "$APK" ]; then
+            echo "::error::No APK was generated."
+            find src-tauri/gen/android -name '*.apk' -o -name '*.aab' | head -30
+            exit 1
+          fi
+          echo "APK: $APK"
+          echo "path=$APK" >> "$GITHUB_OUTPUT"
+          VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: APK als Artefakt hochladen
         uses: actions/upload-artifact@v4
         with:
           name: EXIPTV-Android-v${{ steps.apk.outputs.version }}
-          path: dist-apk/*.apk
+          path: _src/${{ steps.apk.outputs.path }}
           if-no-files-found: error
           retention-days: 14
+
+      - name: Aktuelles Android-Release veröffentlichen
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-aktuell
+          name: EXIPTV Android – aktueller Build
+          body: |
+            Automatisch erzeugte Android-APK aus dem aktuellen Build.
+          prerelease: true
+          files: _src/${{ steps.apk.outputs.path }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
