@@ -40,6 +40,23 @@ jobs:
           echo "Projekt-ZIP: ${ZIPS[0]}"
           node -e "const c=require('./_src/src-tauri/tauri.conf.json'); console.log('App:', c.productName, 'Version:', c.version)"
 
+      - name: Rust-Einstiegspunkt für Android prüfen
+        working-directory: _src
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "===== Rust source files ====="
+          find src-tauri/src -maxdepth 3 -type f -name '*.rs' -print | sort
+          echo "===== Entry point and Tauri builder references ====="
+          grep -RniE 'mobile_entry_point|fn main|tauri::Builder|\.run\(' src-tauri/src --include='*.rs' || true
+          echo "===== Cargo library and binary configuration ====="
+          sed -n '1,240p' src-tauri/Cargo.toml
+          echo "===== Main Rust files ====="
+          while IFS= read -r file; do
+            echo "--- $file"
+            sed -n '1,260p' "$file"
+          done < <(find src-tauri/src -maxdepth 2 -type f \( -name 'lib.rs' -o -name 'main.rs' \) | sort)
+
       - name: Java einrichten
         uses: actions/setup-java@v4
         with:
