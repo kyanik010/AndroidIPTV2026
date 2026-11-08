@@ -1,25 +1,127 @@
-name: Inspect embedded Android workflow
+name: EXIPTV Android APK
 
 on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  inspect:
+  build-android:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - name: Extract source ZIP and print original Android workflow
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract and validate source ZIP
+        id: source
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf _src && mkdir -p _src
-          unzip -q exiptv-komplett.zip -d _src
-          echo "===== EMBEDDED ANDROID WORKFLOW ====="
-          sed -n '1,320p' _src/.github/workflows/android-build.yml
-          echo "===== ANDROID POST-PROCESS SCRIPT ====="
-          sed -n '1,280p' _src/scripts/android-nachbereiten.py
-          echo "===== KOTLIN PLUGIN GRADLE ====="
-          sed -n '1,220p' _src/android-plugin/build.gradle.kts
-          echo "===== VITE CONFIG ====="
-          sed -n '1,180p' _src/vite.config.ts
+          mapfile -t ZIPS < <(git ls-files '*.zip')
+          if [ "\${#ZIPS[@]}" -ne 1 ]; then
+            echo "Expected exactly one source ZIP, found \${#ZIPS[@]}"
+            printf '%s\n' "\${ZIPS[@]}"
+            exit 1
+          fi
+          rm -rf _src
+          mkdir -p _src
+          unzip -q "\${ZIPS[0]}" -d _src
+          if [ ! -f _src/package.json ] || [ ! -f _src/src-tauri/tauri.conf.json ]; then
+            echo "ZIP is missing package.json or src-tauri/tauri.conf.json"
+            find _src -maxdepth 3 -type f | sort | head -200
+            exit 1
+          fi
+          echo "project_root=_src" >> "$GITHUB_OUTPUT"
+          echo "Source archive: \${ZIPS[0]}"
+          node -e "const c=require('./_src/src-tauri/tauri.conf.json'); console.log('Tauri app:', c.productName, 'version:', c.version)"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: _src/package-lock.json
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Rust and Android targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK and NDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager \
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
+            "platform-tools" \
+            "ndk;27.0.12077973"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.0.12077973" >> "$GITHUB_ENV"
+          echo "NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.0.12077973" >> "$GITHUB_ENV"
+
+      - name: Install frontend dependencies
+        working-directory: _src
+        run: npm ci --no-audit --no-fund
+
+      - name: Test Rust core
+        working-directory: _src
+        run: cargo test --workspace --locked
+
+      - name: Initialize Tauri Android project
+        working-directory: _src
+        run: npm run tauri android init -- --ci
+
+      - name: Apply project Android configuration
+        working-directory: _src
+        run: python3 scripts/android-nachbereiten.py
+
+      - name: Build Android APK
+        working-directory: _src
+        run: npm run tauri android build -- --apk --debug --target aarch64 --target armv7
+
+      - name: Collect APK and build metadata
+        id: apk
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t APKS < <(find _src/src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' 2>/dev/null | sort)
+          if [ "\${#APKS[@]}" -eq 0 ]; then
+            echo "No APK produced. Android build output:"
+            find _src/src-tauri/gen/android/app/build/outputs -maxdepth 7 -type f 2>/dev/null | sort || true
+            exit 1
+          fi
+          VERSION="$(node -p "require('./_src/src-tauri/tauri.conf.json').version")"
+          mkdir -p dist-apk
+          for apk in "\${APKS[@]}"; do
+            cp "$apk" "dist-apk/$(basename "$apk")"
+          done
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          {
+            echo "## EXIPTV Android build"
+            echo ""
+            echo "- Version: **$VERSION**"
+            echo "- Source: \`\${ZIPS[0]}\`"
+            echo "- APK files:"
+            printf '  - %s\n' "\${APKS[@]}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: EXIPTV-Android-v\${{ steps.apk.outputs.version }}
+          path: dist-apk/*.apk
+          if-no-files-found: error
+          retention-days: 14
